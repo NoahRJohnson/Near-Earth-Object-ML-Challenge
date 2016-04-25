@@ -15,15 +15,19 @@ Labels are 2-dimensional one-hot vectors. (1,0) for eventual false positive, and
 # GLOBAL FILENAMES
 removed_fn = "Removed.txt"
 not_removed_fn = "NotRemoved.txt"
+removed_folder = "removed/"
+not_removed_folder = "risks/"
 
 
-def extract_features_from_observations(fn):
+def extract_features_from_observations(names_fn, folder):
     coords = []
     cnt = 0
 
-    with open(fn, 'r') as names_f:
+    with open(names_fn, 'r') as names_f:
         for NEO_name in names_f.readlines():
-            NEO_name = NEO_name + ".txt"
+            if (len(NEO_name) > 1 and NEO_name[len(NEO_name)-1] == "\n"):
+                NEO_name = NEO_name[:-1] # Remove ending newline
+            NEO_name = folder + NEO_name + ".txt"
             try:
                 with open(NEO_name, 'r') as observations_f:
                     for observation in observations_f.readlines():
@@ -31,6 +35,7 @@ def extract_features_from_observations(fn):
                         RA_l = RA_s.split() # split on space
                         if len(RA_l) != 3:
                             print "error reading RA field for an observation in %s: wrong number of digits" % NEO_name
+                            continue
                         RA_h = RA_l[0]
                         try:
                             RA_h = int(RA_h)
@@ -59,6 +64,7 @@ def extract_features_from_observations(fn):
                         dec_l = dec_s.split() # split on space
                         if len(dec_l) != 3:
                             print "error reading dec field for an observation in %s: wrong number of digits" % NEO_name
+                            continue
                         dec_d = dec_l[0]
                         try:
                             dec_d = int(dec_d)
@@ -98,26 +104,28 @@ def extract_features_from_observations(fn):
     
     
     
-removed_l, cnt = extract_features_from_observations(removed_fn)
+removed_l, cnt = extract_features_from_observations(removed_fn, removed_folder)
 removed_ar = np.reshape(np.asarray(removed_l), (cnt,6))
 removed_labels = np.reshape(np.asarray([1,0]*cnt), (cnt,2))
 
-not_removed_l, cnt = extract_features_from_observations(not_removed_fn)
+not_removed_l, cnt = extract_features_from_observations(not_removed_fn, not_removed_folder)
 not_removed_ar = np.reshape(np.asarray(not_removed_l), (cnt,6))
 not_removed_labels = np.reshape(np.asarray([0,1]*cnt), (cnt,2))
 
 x_batch = np.vstack((removed_ar,not_removed_ar))
 y_batch = np.vstack((removed_labels,not_removed_labels))
 
+print x_batch.shape, y_batch.shape
 
 
 
 
 
 
-x = tf.placeholder(tf.float32, [None, 2])
 
-W = tf.Variable(tf.zeros([2, 2]))
+x = tf.placeholder(tf.float32, [None, 6])
+
+W = tf.Variable(tf.zeros([6, 2]))
 b = tf.Variable(tf.zeros([2]))
 
 y = tf.nn.softmax(tf.matmul(x, W) + b)
