@@ -2,6 +2,7 @@ from ptyprocess.ptyprocess import FileNotFoundError
 
 import tensorflow as tf
 import numpy as np
+import random
 
 '''
 Feature Vectors are Right Ascension and Declination (these specify celestial coordinates)
@@ -117,36 +118,83 @@ y_batch = np.vstack((removed_labels,not_removed_labels))
 
 print x_batch.shape, y_batch.shape
 
+# Do k-fold cross-validation on our NN
+x_cp = np.copy(x_batch)
+y_cp = np.copy(y_batch)
+random.seed()
+k = 5
+n = x_batch.shape[0]
+nks = [[]]*k
+obs_bins = [[]]*k
+lbl_bins = [[]]*k
+for i in range(k):
+    nks[i] = n / k
+    if i == k:
+        nks[i] = nks[i] + (n % k)*(k-1)
+    for j in range(nks[i]):
+        p = random.randint(0,x_cp.shape[0]-1)
+        obs_bins[i].append(x_cp[p].tolist())
+        x_cp = np.delete(x_cp, p, 0)
+        
+        lbl_bins[i].append(y_cp[p].tolist())
+        y_cp = np.delete(y_cp, p, 0)
 
+x_bins = []
+y_bins = []
+for i in range(k):
+    x_bins.append(np.asarray(obs_bins[i]))
+    y_bins.append(np.asarray(lbl_bins[i]))
 
+def train_net(xtrain, ytrain, xtest, ytest): # Assume 2-dimensional parameters
 
+    num_inputs = xtrain.shape[1]
+    num_outputs = ytrain.shape[1]
+    x = tf.placeholder(tf.float32, [None, num_inputs])
 
+    W = tf.Variable(tf.zeros([num_inputs, num_outputs]))
+    b = tf.Variable(tf.zeros([num_outputs]))
 
+    y = tf.nn.softmax(tf.matmul(x, W) + b)
 
-x = tf.placeholder(tf.float32, [None, 6])
+    y_ = tf.placeholder(tf.float32, [None, num_outputs])
 
-W = tf.Variable(tf.zeros([6, 2]))
-b = tf.Variable(tf.zeros([2]))
+    cross_entropy = -tf.reduce_sum(y_*tf.log(y))
 
-y = tf.nn.softmax(tf.matmul(x, W) + b)
+    train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
 
-y_ = tf.placeholder(tf.float32, [None, 2])
+    init = tf.initialize_all_variables()
 
-cross_entropy = -tf.reduce_sum(y_*tf.log(y))
+    sess = tf.Session()
+    sess.run(init)
 
-train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
+    for i in range(1000):
+        sess.run(train_step, feed_dict={x: xtrain, y_: ytrain})
 
-init = tf.initialize_all_variables()
+    correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
 
-sess = tf.Session()
-sess.run(init)
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-for i in range(1000):
-    sess.run(train_step, feed_dict={x: x_batch, y_: y_batch})
+    # We need to run this on a test set of data. This just tells training error
+    accuracy = sess.run(accuracy, feed_dict={x: xtest, y_: ytest})
+    test_error = 1.0 - accuracy
+    
+    return test_error
 
-correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
-
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-# We need to run this on a test set of data. This just tells training error
-print(sess.run(accuracy, feed_dict={x: x_batch, y_: y_batch}))
+CV_k = 0
+for i in range(k):
+    x_train = np.zeros((0,0))
+    y_train = np.zeros((0,0))
+    for j in range(k):
+        if j == i:
+            continue
+        if x_train.shape[0] == 0:
+            x_train = x_bins[j]
+            y_train = y_bins[j]
+        else:
+            np.vstack((x_train,x_bins[j]))
+            np.vstack((y_train,y_bins[j]))
+    x_test = x_bins[i]
+    y_test = y_bins[i]
+    CV_k = CV_k + (float(nks[i]) / n) * train_net(x_train, y_train, x_test, y_test)
+    
+print "Estimated test error by %d-fold cross-validation: %f" % (k, CV_k)
