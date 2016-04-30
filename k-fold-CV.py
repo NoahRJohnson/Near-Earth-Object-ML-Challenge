@@ -3,10 +3,6 @@ from ptyprocess.ptyprocess import FileNotFoundError
 import tensorflow as tf
 import numpy as np
 import random
-from matplotlib.dates import hours
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.ticker import LinearLocator
-import matplotlib.pyplot as plt
 
 '''
 Feature Vectors are Right Ascension and Declination (these specify celestial coordinates)
@@ -122,160 +118,83 @@ y_batch = np.vstack((removed_labels,not_removed_labels))
 
 print x_batch.shape, y_batch.shape
 
-# Now train our net
-
-num_inputs = x_batch.shape[1]
-num_outputs = y_batch.shape[1]
-FV = tf.placeholder(tf.float32, [None, num_inputs])
-
-W = tf.Variable(tf.zeros([num_inputs, num_outputs]), name="weights")
-b = tf.Variable(tf.zeros([num_outputs]), name="biases")
-
-labels = tf.nn.softmax(tf.matmul(FV, W) + b)
-'''
-labels_ = tf.placeholder(tf.float32, [None, num_outputs])
-
-cross_entropy = -tf.reduce_sum(labels_*tf.log(labels))
-
-train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
-
-init = tf.initialize_all_variables()
-
-saver = tf.train.Saver()
-    
-# Add op to save and restore all the variables.
-#saver = tf.train.Saver()
-
-sess = tf.Session()
-sess.run(init)
-
-for i in range(1000):
-    sess.run(train_step, feed_dict={FV: x_batch, labels_: y_batch})
-
-# Save the variables to disk.
-save_path = saver.save(sess, "model.ckpt")
-    
-'''
-
-
-# Now train the model based on all of the data
-#W,b = train_net(x_batch, y_batch)
-
-# Add op to restore all the variables.
-#saver = tf.train.Saver()
-  
-#FV = tf.placeholder(tf.float32, [1, x_batch.shape[1]])
-#prediction = tf.nn.softmax(tf.matmul(FV, W) + b)
-
-sess = tf.Session()
-# Restore variables from disk.
-#saver.restore(sess, "model.ckpt")
-
-# Now create a visualization of the 4-d data using matplotlib
-
-# Spherical coordinates define our celestial sphere
-phi = np.linspace(0, 2 * np.pi, 100)
-theta = np.linspace(0, np.pi, 100)
-r = 10 # We don't care really what r is
-
-X = r * np.outer(np.cos(phi), np.sin(theta))
-Y = r * np.outer(np.sin(phi), np.sin(theta))
-Z = r * np.outer(np.ones(np.size(phi)), np.cos(theta))
-xlen = len(X)
-ylen = len(Y)
-zlen = len(Z)
-
-# Define change of coords from spherical to celestial
-def SphericalToCelestial(theta, phi):
-    
-    decl = (np.pi / 2.0) - theta # conversion formula
-    decl_degs = np.rad2deg(phi)
-    decl_mins = (decl_degs - int(decl_degs))*60
-    decl_secs = ((decl_mins) - int(decl_mins))*60
-    
-    decl_degs = int(decl_degs)
-    decl_mins = int(decl_mins)
-    decl_secs = round(decl_secs, 2)
-    
-    RA_hours = np.rad2deg(phi) / 15
-    RA_mins = (RA_hours - int(RA_hours))*60
-    RA_secs = (RA_mins - int(RA_mins))*60
-    
-    RA_hours = int(RA_hours)
-    RA_mins = int(RA_mins)
-    RA_seconds = round(RA_secs,2)
-    return (RA_hours, RA_mins, RA_seconds, decl_degs, decl_mins, decl_secs)
-    
-if 1: # Load model from disk
-    saver = tf.train.Saver()
-    saver.restore(sess, "model.ckpt")
-    
-all_sphere_points = []
-cnt = 0
-# Iterate over every point on the celestial sphere (assume all dimension arrays have same shape)
-for i in range(X.shape[0]):
-    for j in range(X.shape[1]):
-        # Get our 3-D data point in rectangular coords
-        x = X[i][j]
-        y = Y[i][j]
-        z = Z[i][j]
+# Do k-fold cross-validation on our NN
+x_cp = np.copy(x_batch)
+y_cp = np.copy(y_batch)
+random.seed()
+k = 5
+n = x_batch.shape[0]
+nks = [[]]*k
+obs_bins = [[]]*k
+lbl_bins = [[]]*k
+for i in range(k):
+    nks[i] = n / k
+    if i == k:
+        nks[i] = nks[i] + (n % k)*(k-1)
+    for j in range(nks[i]):
+        p = random.randint(0,x_cp.shape[0]-1)
+        obs_bins[i].append(x_cp[p].tolist())
+        x_cp = np.delete(x_cp, p, 0)
         
-        # Convert from rectangular to spherical coordinates
-        theta = np.arccos(z / (np.sqrt(x**2 + y**2 + z**2)))
-        phi = np.arctan2(y,x) # Note the special function arctan2 to handle edge cases like x == 0
-            
-        # Generate our FV using celestial coordinates
-        rh, rm, rs, dd, dm, ds = SphericalToCelestial(theta, phi)
-        cnt = cnt + 1
-        all_sphere_points.append(float(rh))
-        all_sphere_points.append(float(rm))
-        all_sphere_points.append(float(rs))
-        all_sphere_points.append(float(dd))
-        all_sphere_points.append(float(dm))
-        all_sphere_points.append(float(ds))
-        
-all_sphere_points = np.reshape(np.asarray(all_sphere_points), (cnt,6))
+        lbl_bins[i].append(y_cp[p].tolist())
+        y_cp = np.delete(y_cp, p, 0)
+
+x_bins = []
+y_bins = []
+for i in range(k):
+    x_bins.append(np.asarray(obs_bins[i]))
+    y_bins.append(np.asarray(lbl_bins[i]))
+
+def train_net(xtrain, ytrain, xtest, ytest): # Assume 2-dimensional parameters
+
+    num_inputs = xtrain.shape[1]
+    num_outputs = ytrain.shape[1]
+    x = tf.placeholder(tf.float32, [None, num_inputs])
+
+    W = tf.Variable(tf.zeros([num_inputs, num_outputs]))
+    b = tf.Variable(tf.zeros([num_outputs]))
+
+    y = tf.nn.softmax(tf.matmul(x, W) + b)
+
+    y_ = tf.placeholder(tf.float32, [None, num_outputs])
+
+    cross_entropy = -tf.reduce_sum(y_*tf.log(y))
+
+    train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
+
+    init = tf.initialize_all_variables()
+
+    sess = tf.Session()
+    sess.run(init)
+
+    for i in range(1000):
+        sess.run(train_step, feed_dict={x: xtrain, y_: ytrain})
+
+    correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+    # We need to run this on a test set of data. This just tells training error
+    accuracy = sess.run(accuracy, feed_dict={x: xtest, y_: ytest})
+    test_error = 1.0 - accuracy
     
-# Use the trained neural net to predict the class of our FV inputs
-NN_predictions = sess.run(labels, feed_dict={FV: all_sphere_points})
-print NN_predictions, NN_predictions.shape
+    return test_error
 
-        
-# Generate separate data points for FPs and non-FPs, which we will plot with appropriate colors
-X_FPs = []
-Y_FPs = []
-Z_FPs = []
-
-X_nonFPs = []
-Y_nonFPs = []
-Z_nonFPs = []
-
-for i in range(X.shape[0]):
-    for j in range(X.shape[1]):
-        # Get our 3-D data point in rectangular coords
-        x = X[i][j]
-        y = Y[i][j]
-        z = Z[i][j]
-        
-        # Append this data point on the 3-D celestial sphere, to the correct list (for correct color) based on NN prediction.
-        if NN_predictions[i*X.shape[0] + j][0] == 1:
-            X_nonFPs.append(x)
-            Y_nonFPs.append(y)
-            Z_nonFPs.append(z)
-        elif NN_predictions[i*X.shape[0] + j][1] == 1:
-            X_nonFPs.append(x)
-            Y_nonFPs.append(y)
-            Z_nonFPs.append(z)
+CV_k = 0
+for i in range(k):
+    x_train = np.zeros((0,0))
+    y_train = np.zeros((0,0))
+    for j in range(k):
+        if j == i:
+            continue
+        if x_train.shape[0] == 0:
+            x_train = x_bins[j]
+            y_train = y_bins[j]
         else:
-            pass
-            #print "Third hot vector class not supported."
-
-        
-fig = plt.figure()
-ax = fig.gca(projection='3d')
-
-# Plot scatter plots. I wish we could use surface_plot here, but it doesn't support 3-d colormaps
-surf1 = ax.scatter(X_FPs, Y_FPs, Z_FPs, c = 'b', linewidth=0, antialiased=False)
-surf2 = ax.scatter(X_nonFPs, Y_nonFPs, Z_nonFPs, c = 'r', linewidth=0, antialiased=False)
-
-plt.show()
+            np.vstack((x_train,x_bins[j]))
+            np.vstack((y_train,y_bins[j]))
+    x_test = x_bins[i]
+    y_test = y_bins[i]
+    CV_k = CV_k + (float(nks[i]) / n) * train_net(x_train, y_train, x_test, y_test)
+    
+print "Estimated test error by %d-fold cross-validation: %f" % (k, CV_k)
