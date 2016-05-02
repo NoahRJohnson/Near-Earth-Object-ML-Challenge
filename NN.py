@@ -17,11 +17,14 @@ Labels are 2-dimensional one-hot vectors. (1,0) for eventual false positive, and
  an object which still has a chance to impact Earth.
 '''
 
-# GLOBAL FILENAMES
+# GLOBALS
 removed_fn = "Removed.txt"
 not_removed_fn = "NotRemoved.txt"
 removed_folder = "removed/"
 not_removed_folder = "risks/"
+
+TRAIN_OR_TEST = 1
+
 
 
 def extract_features_from_observations(names_fn, folder):
@@ -132,30 +135,33 @@ W = tf.Variable(tf.zeros([num_inputs, num_outputs]), name="weights")
 b = tf.Variable(tf.zeros([num_outputs]), name="biases")
 
 labels = tf.nn.softmax(tf.matmul(FV, W) + b)
-'''
-labels_ = tf.placeholder(tf.float32, [None, num_outputs])
-
-cross_entropy = -tf.reduce_sum(labels_*tf.log(labels))
-
-train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
-
-init = tf.initialize_all_variables()
-
-saver = tf.train.Saver()
-    
-# Add op to save and restore all the variables.
-#saver = tf.train.Saver()
 
 sess = tf.Session()
-sess.run(init)
 
-for i in range(1000):
-    sess.run(train_step, feed_dict={FV: x_batch, labels_: y_batch})
 
-# Save the variables to disk.
-save_path = saver.save(sess, "model.ckpt")
+if (TRAIN_OR_TEST == 0):
+    labels_ = tf.placeholder(tf.float32, [None, num_outputs])
+
+    cross_entropy = -tf.reduce_sum(labels_*tf.log(tf.clip_by_value(labels,1e-10,1.0)))
+
+    train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
+
+    init = tf.initialize_all_variables()
+
+    # Add op to save variables (weight and bias).
+    saver = tf.train.Saver()
+
     
-'''
+    sess.run(init)
+
+    for i in range(1000):
+        sess.run(train_step, feed_dict={FV: x_batch, labels_: y_batch})
+
+    # Save the variables to disk.
+    saver.save(sess, "model.ckpt")
+else:
+    saver = tf.train.Saver()
+    saver.restore(sess, "model.ckpt")
 
 
 # Now train the model based on all of the data
@@ -167,7 +173,7 @@ save_path = saver.save(sess, "model.ckpt")
 #FV = tf.placeholder(tf.float32, [1, x_batch.shape[1]])
 #prediction = tf.nn.softmax(tf.matmul(FV, W) + b)
 
-sess = tf.Session()
+
 # Restore variables from disk.
 #saver.restore(sess, "model.ckpt")
 
@@ -206,13 +212,10 @@ def SphericalToCelestial(theta, phi):
     RA_seconds = round(RA_secs,2)
     return (RA_hours, RA_mins, RA_seconds, decl_degs, decl_mins, decl_secs)
     
-if 1: # Load model from disk
-    saver = tf.train.Saver()
-    saver.restore(sess, "model.ckpt")
     
 all_sphere_points = []
 cnt = 0
-# Iterate over every point on the celestial sphere (assume all dimension arrays have same shape)
+# Get every point on the celestial sphere in celestial coords
 for i in range(X.shape[0]):
     for j in range(X.shape[1]):
         # Get our 3-D data point in rectangular coords
@@ -224,8 +227,10 @@ for i in range(X.shape[0]):
         theta = np.arccos(z / (np.sqrt(x**2 + y**2 + z**2)))
         phi = np.arctan2(y,x) # Note the special function arctan2 to handle edge cases like x == 0
             
-        # Generate our FV using celestial coordinates
+        # Generate celestial coordinates
         rh, rm, rs, dd, dm, ds = SphericalToCelestial(theta, phi)
+        
+        # Append to our list
         cnt = cnt + 1
         all_sphere_points.append(float(rh))
         all_sphere_points.append(float(rm))
@@ -234,9 +239,18 @@ for i in range(X.shape[0]):
         all_sphere_points.append(float(dm))
         all_sphere_points.append(float(ds))
         
+# Reshape list into correct shape
 all_sphere_points = np.reshape(np.asarray(all_sphere_points), (cnt,6))
     
 # Use the trained neural net to predict the class of our FV inputs
+w_out = sess.run(W)
+print w_out
+b_out = sess.run(b)
+print b_out
+w_out = tf.Print(W, [W])
+#fv_out = tf.Print(FV, [FV], name='fv')
+mat_res = tf.matmul(FV,W)
+a = tf.Print(mat_res, [mat_res])
 NN_predictions = sess.run(labels, feed_dict={FV: all_sphere_points})
 print NN_predictions, NN_predictions.shape
 
@@ -259,16 +273,15 @@ for i in range(X.shape[0]):
         
         # Append this data point on the 3-D celestial sphere, to the correct list (for correct color) based on NN prediction.
         if NN_predictions[i*X.shape[0] + j][0] == 1:
-            X_nonFPs.append(x)
-            Y_nonFPs.append(y)
-            Z_nonFPs.append(z)
+            X_FPs.append(x)
+            Y_FPs.append(y)
+            Z_FPs.append(z)
         elif NN_predictions[i*X.shape[0] + j][1] == 1:
             X_nonFPs.append(x)
             Y_nonFPs.append(y)
             Z_nonFPs.append(z)
         else:
-            pass
-            #print "Third hot vector class not supported."
+            print "Third hot vector class not supported."
 
         
 fig = plt.figure()
@@ -279,3 +292,4 @@ surf1 = ax.scatter(X_FPs, Y_FPs, Z_FPs, c = 'b', linewidth=0, antialiased=False)
 surf2 = ax.scatter(X_nonFPs, Y_nonFPs, Z_nonFPs, c = 'r', linewidth=0, antialiased=False)
 
 plt.show()
+plt.savefig("Celestial_Sphere_classifications.png")

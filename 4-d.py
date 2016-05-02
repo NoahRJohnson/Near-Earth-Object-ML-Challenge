@@ -59,12 +59,12 @@ T = np.empty((xlen,ylen,zlen))
 T[:,:,2] = 0.8
 #wireframe_sphere = ax.plot_wireframe(X,Y,Z,rstride=4,cstride=4)
 
-X1 = X[:len(X)/2]
-Y1 = Y[:len(Y)/2]
-Z1 = Z[:len(Z)/2]
-X2 = X[len(X)/2:]
-Y2 = Y[len(Y)/2:]
-Z2 = Z[len(Z)/2:]
+X1 = X[:,:len(X)/3]
+Y1 = Y[:,:len(Y)/3]
+Z1 = Z[:,:len(Z)/3]
+X2 = X[:,len(X)/3:]
+Y2 = Y[:,len(Y)/3:]
+Z2 = Z[:,len(Z)/3:]
 surf = ax.scatter(X1.flatten(), Y1.flatten(), Z1.flatten(), c='r',
                        linewidth=0, antialiased=False)
 surf = ax.scatter(X2, Y2, Z2, c='y',
